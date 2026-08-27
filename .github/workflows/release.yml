@@ -71,11 +71,14 @@ jobs:
           echo "PATH=$PATH"
 
       # ----- pub get -----
-      # flutter --version 已在上一 step 完成 SDK 初始化，这里直接 pub get
       - name: flutter pub get
         working-directory: bt_safe
         shell: bash
-        run: flutter pub get
+        env:
+          PUB_CACHE: ${{ runner.temp }}/pub-cache
+        run: |
+          flutter --suppress-analytics --version
+          flutter --suppress-analytics pub get --verbose 2>&1 | head -100
 
       # ----- 启用目标平台 -----
       - name: Enable desktop targets
