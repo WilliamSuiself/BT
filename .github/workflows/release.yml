@@ -1,18 +1,14 @@
 name: Release BT Safe
 
-# 仅在打 tag (v*) 时触发，构建三端 release 并发布到 GitHub Release
 on:
   push:
     tags:
       - 'v*'
 
 permissions:
-  contents: write   # 创建 Release 需要写权限
+  contents: write
 
 jobs:
-  # ===========================================================
-  # 1. 三端并行构建
-  # ===========================================================
   build:
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
@@ -20,39 +16,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ----- Windows x64 -----
           - runner: windows-latest
             label: windows-x64
             artifact_name: bt_safe_windows_x64
             build_path: build/windows/x64/runner/Release
             bundle_name: bt_safe
 
-          # ----- macOS Universal (arm64 + x64) -----
           - runner: macos-latest
             label: macos-universal
             artifact_name: bt_safe_macos_universal
             build_path: build/macos/Build/Products/Release
             bundle_name: bt_safe.app
 
-          # ----- Linux x64 -----
           - runner: ubuntu-latest
             label: linux-x64
             artifact_name: bt_safe_linux_x64
             build_path: build/linux/x64/release
             bundle_name: bundle
 
+    env:
+      # 把 Flutter 加进 PATH（subosito/flutter-action 装到 ~/flutter）
+      FLUTTER_ROOT: ${{ github.workspace }}/.flutter
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ---------- 安装 Flutter ----------
-      - name: Install Flutter (stable)
-        uses: subosito/flutter-action@v2
+      # ----- 安装 Flutter（显式版本）-----
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2.18.0
         with:
           flutter-version: '3.41.2'
           channel: stable
 
-      # ---------- Linux 编译依赖 ----------
+      # ----- Linux 依赖 -----
       - name: Install Linux deps
         if: matrix.label == 'linux-x64'
         shell: bash
@@ -62,13 +58,20 @@ jobs:
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++6
 
-      # ---------- pub get ----------
+      # ----- Debug：确认 flutter 可用 -----
+      - name: Verify flutter
+        shell: bash
+        run: |
+          which flutter || true
+          flutter --version || true
+
+      # ----- pub get（在 bt_safe 子目录下）-----
       - name: flutter pub get
         working-directory: bt_safe
         shell: bash
         run: flutter pub get
 
-      # ---------- 启用目标平台 ----------
+      # ----- 启用目标平台 -----
       - name: Enable desktop targets
         working-directory: bt_safe
         shell: bash
@@ -77,13 +80,13 @@ jobs:
           flutter config --enable-macos-desktop
           flutter config --enable-linux-desktop
 
-      # ---------- 跑单元测试 ----------
+      # ----- 跑测试 -----
       - name: Run tests
         working-directory: bt_safe
         shell: bash
         run: flutter test
 
-      # ---------- 构建 release ----------
+      # ----- 构建 release -----
       - name: Build Windows release
         if: matrix.label == 'windows-x64'
         working-directory: bt_safe
@@ -96,8 +99,7 @@ jobs:
         shell: bash
         run: |
           flutter build macos --release
-          # codesign ad-hoc，避免部分用户运行报"无法验证开发者"
-          codesign --force --deep --sign - build/macos/Build/Products/Release/bt_safe.app
+          codesign --force --deep --sign - build/macos/Build/Products/Release/bt_safe.app || true
 
       - name: Build Linux release
         if: matrix.label == 'linux-x64'
@@ -105,19 +107,7 @@ jobs:
         shell: bash
         run: flutter build linux --release
 
-      # ---------- 检查产物 ----------
-      - name: List build output
-        shell: bash
-        working-directory: bt_safe
-        run: |
-          echo "=== build dir contents ==="
-          ls -la build/
-          echo "=== ${{ matrix.build_path }} contents ==="
-          ls -la "${{ matrix.build_path }}/" || echo "PATH_NOT_FOUND"
-          echo "=== bundle ==="
-          ls -la "${{ matrix.build_path }}/${{ matrix.bundle_name }}/" 2>&1 || echo "BUNDLE_NOT_FOUND"
-
-      # ---------- 拷贝成标准目录结构 ----------
+      # ----- 拷贝成标准目录 -----
       - name: Stage artifact
         shell: bash
         working-directory: bt_safe
@@ -126,7 +116,7 @@ jobs:
           cp -R "${{ matrix.build_path }}/${{ matrix.bundle_name }}" stage/${{ matrix.bundle_name }}
           ls -la stage/
 
-      # ---------- 上传 artifact ----------
+      # ----- 上传 artifact -----
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -135,9 +125,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # ===========================================================
-  # 2. 打包三端并发布到 GitHub Release
-  # ===========================================================
   release:
     name: Create GitHub Release
     needs: build
@@ -151,10 +138,6 @@ jobs:
         with:
           path: artifacts
 
-      - name: List artifacts
-        run: ls -la artifacts/
-
-      # ---------- 压缩 zip ----------
       - name: Zip Windows
         shell: bash
         run: |
@@ -173,24 +156,19 @@ jobs:
           cd artifacts/bt_safe_linux_x64
           tar czf ../../bt_safe_linux_x64.tar.gz .
 
-      # ---------- 生成 Release notes ----------
       - name: Generate release notes
         run: |
           {
             echo "## BT Safe ${GITHUB_REF_NAME}"
             echo ""
-            echo "### 下载"
-            echo ""
-            echo "| 平台 | 文件 | 说明 |"
-            echo "|------|------|------|"
-            echo "| Windows x64 | \`bt_safe_windows_x64.zip\` | 解压后双击 bt_safe.exe |"
-            echo "| macOS (Universal) | \`bt_safe_macos_universal.zip\` | arm64 + x64，拖入 Applications |"
-            echo "| Linux x64 | \`bt_safe_linux_x64.tar.gz\` | 解压后运行 ./bt_safe/bundle/bt_safe |"
-            echo ""
-            echo "### 校验"
+            echo "| Platform | File |"
+            echo "|----------|------|"
+            echo "| Windows x64 | \`bt_safe_windows_x64.zip\` |"
+            echo "| macOS Universal | \`bt_safe_macos_universal.zip\` |"
+            echo "| Linux x64 | \`bt_safe_linux_x64.tar.gz\` |"
             echo ""
             echo '```'
-            echo "sha256sum bt_safe_*.* | tee SHA256SUMS"
+            echo "sha256sum bt_safe_*.*"
             echo '```'
           } >> release_notes.md
         shell: bash
