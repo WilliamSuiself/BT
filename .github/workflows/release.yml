@@ -28,7 +28,13 @@ jobs:
 
       - name: flutter pub get
         working-directory: bt_safe
-        run: flutter pub get
+        run: |
+          cd bt_safe
+          pwd
+          ls -la
+          cat pubspec.yaml
+          flutter --suppress-analytics pub get --verbose 2>&1 | tail -200
+          echo "EXIT_CODE=$?"
 
       - name: Enable Windows desktop
         working-directory: bt_safe
