@@ -13,20 +13,22 @@ jobs:
     name: Build Windows x64
     runs-on: windows-latest
 
+    env:
+      PUB_HOSTED_URL: https://pub.flutter-io.cn
+      FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ----- 装 Flutter SDK（用 PowerShell，避免 Git Bash 路径问题）-----
+      # ----- 装 Flutter SDK -----
       - name: Install Flutter SDK
         shell: pwsh
         run: |
-          Write-Host "Cloning Flutter SDK..."
+          Write-Host "Cloning Flutter SDK (stable)..."
           git clone --depth 1 --branch stable https://github.com/flutter/flutter.git C:\flutter
           Write-Host "Flutter SDK cloned"
-          # 把 flutter 加到 PATH（写入 GITHUB_PATH 后续 step 生效）
           "C:\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          Write-Host "GITHUB_PATH updated"
 
       # ----- 验证 Flutter -----
       - name: Verify Flutter
@@ -40,10 +42,13 @@ jobs:
         shell: pwsh
         run: flutter config --no-analytics
 
-      # ----- pub get（用 cmd，避免 bash）-----
+      # ----- pub get（用 cmd + 详细日志）-----
       - name: flutter pub get
         working-directory: bt_safe
         shell: cmd
+        env:
+          PUB_HOSTED_URL: https://pub.flutter-io.cn
+          FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
         run: |
           echo === pub get start ===
           flutter --suppress-analytics pub get
