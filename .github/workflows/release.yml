@@ -13,6 +13,10 @@ jobs:
     name: Build Windows x64
     runs-on: windows-latest
 
+    defaults:
+      run:
+        shell: pwsh
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,12 +33,15 @@ jobs:
       - name: flutter pub get
         working-directory: bt_safe
         run: |
-          cd bt_safe
-          pwd
-          ls -la
-          cat pubspec.yaml
-          flutter --suppress-analytics pub get --verbose 2>&1 | tail -200
-          echo "EXIT_CODE=$?"
+          Write-Host "=== pwd ==="
+          Get-Location
+          Write-Host "=== ls bt_safe ==="
+          Get-ChildItem
+          Write-Host "=== pubspec.yaml ==="
+          Get-Content pubspec.yaml
+          Write-Host "=== pub get ==="
+          flutter --suppress-analytics pub get
+          Write-Host "=== exit code: $LASTEXITCODE ==="
 
       - name: Enable Windows desktop
         working-directory: bt_safe
@@ -50,7 +57,6 @@ jobs:
 
       - name: Stage artifact
         working-directory: bt_safe
-        shell: pwsh
         run: |
           $src = "build\windows\x64\runner\Release"
           $dst = "stage\bt_safe"
