@@ -11,35 +11,35 @@ permissions:
 
 jobs:
   # ===========================================================
-  # 1. 通用步骤：拉代码 + 安装 Flutter + pub get
+  # 1. 三端并行构建
   # ===========================================================
   build:
-    name: Build ${{ matrix.target.os }} (${{ matrix.target.arch }})
-    runs-on: ${{ matrix.target.os }}
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           # ----- Windows x64 -----
-          - os: windows-latest
-            arch: x64
+          - runner: windows-latest
+            label: windows-x64
             artifact_name: bt_safe_windows_x64
-            artifact_path: build/windows/x64/runner/Release/bt_safe/
-            executable: bt_safe.exe
+            build_path: build/windows/x64/runner/Release
+            bundle_name: bt_safe
 
           # ----- macOS Universal (arm64 + x64) -----
-          - os: macos-latest
-            arch: universal
+          - runner: macos-latest
+            label: macos-universal
             artifact_name: bt_safe_macos_universal
-            artifact_path: build/macos/Build/Products/Release/bt_safe.app/
-            executable: bt_safe.app
+            build_path: build/macos/Build/Products/Release
+            bundle_name: bt_safe.app
 
           # ----- Linux x64 -----
-          - os: ubuntu-latest
-            arch: x64
+          - runner: ubuntu-latest
+            label: linux-x64
             artifact_name: bt_safe_linux_x64
-            artifact_path: build/linux/x64/release/bundle/
-            executable: bt_safe
+            build_path: build/linux/x64/release
+            bundle_name: bundle
 
     steps:
       - name: Checkout source
@@ -52,73 +52,86 @@ jobs:
           flutter-version: '3.41.2'
           channel: stable
 
-      # ---------- 安装各平台编译依赖 ----------
+      # ---------- Linux 编译依赖 ----------
       - name: Install Linux deps
-        if: matrix.target.os == 'ubuntu-latest'
+        if: matrix.label == 'linux-x64'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++6
-        shell: bash
 
       # ---------- pub get ----------
       - name: flutter pub get
         working-directory: bt_safe
+        shell: bash
         run: flutter pub get
 
       # ---------- 启用目标平台 ----------
       - name: Enable desktop targets
         working-directory: bt_safe
+        shell: bash
         run: |
           flutter config --enable-windows-desktop
           flutter config --enable-macos-desktop
           flutter config --enable-linux-desktop
-        shell: bash
 
       # ---------- 跑单元测试 ----------
       - name: Run tests
         working-directory: bt_safe
+        shell: bash
         run: flutter test
 
       # ---------- 构建 release ----------
       - name: Build Windows release
-        if: matrix.target.os == 'windows-latest'
+        if: matrix.label == 'windows-x64'
         working-directory: bt_safe
+        shell: bash
         run: flutter build windows --release
-        shell: cmd
 
       - name: Build macOS release
-        if: matrix.target.os == 'macos-latest'
+        if: matrix.label == 'macos-universal'
         working-directory: bt_safe
+        shell: bash
         run: |
           flutter build macos --release
           # codesign ad-hoc，避免部分用户运行报"无法验证开发者"
           codesign --force --deep --sign - build/macos/Build/Products/Release/bt_safe.app
 
       - name: Build Linux release
-        if: matrix.target.os == 'ubuntu-latest'
+        if: matrix.label == 'linux-x64'
         working-directory: bt_safe
+        shell: bash
         run: flutter build linux --release
 
-      # ---------- 检查产物存在 ----------
-      - name: Check artifact exists
+      # ---------- 检查产物 ----------
+      - name: List build output
         shell: bash
         working-directory: bt_safe
         run: |
-          if [ ! -e "${{ matrix.target.artifact_path }}" ]; then
-            echo "ERROR: artifact path not found: ${{ matrix.target.artifact_path }}"
-            ls -R build/ 2>&1 | head -40
-            exit 1
-          fi
-          echo "✓ artifact OK: ${{ matrix.target.artifact_path }}"
+          echo "=== build dir contents ==="
+          ls -la build/
+          echo "=== ${{ matrix.build_path }} contents ==="
+          ls -la "${{ matrix.build_path }}/" || echo "PATH_NOT_FOUND"
+          echo "=== bundle ==="
+          ls -la "${{ matrix.build_path }}/${{ matrix.bundle_name }}/" 2>&1 || echo "BUNDLE_NOT_FOUND"
+
+      # ---------- 拷贝成标准目录结构 ----------
+      - name: Stage artifact
+        shell: bash
+        working-directory: bt_safe
+        run: |
+          mkdir -p stage
+          cp -R "${{ matrix.build_path }}/${{ matrix.bundle_name }}" stage/${{ matrix.bundle_name }}
+          ls -la stage/
 
       # ---------- 上传 artifact ----------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target.artifact_name }}
-          path: ${{ matrix.target.artifact_path }}
+          name: ${{ matrix.artifact_name }}
+          path: bt_safe/stage/${{ matrix.bundle_name }}/
           if-no-files-found: error
           retention-days: 30
 
@@ -143,26 +156,25 @@ jobs:
 
       # ---------- 压缩 zip ----------
       - name: Zip Windows
+        shell: bash
         run: |
           cd artifacts/bt_safe_windows_x64
           zip -r ../../bt_safe_windows_x64.zip .
-        shell: bash
 
       - name: Zip macOS
+        shell: bash
         run: |
           cd artifacts/bt_safe_macos_universal
           zip -r ../../bt_safe_macos_universal.zip bt_safe.app
-        shell: bash
 
       - name: Tar Linux
+        shell: bash
         run: |
           cd artifacts/bt_safe_linux_x64
           tar czf ../../bt_safe_linux_x64.tar.gz .
-        shell: bash
 
       # ---------- 生成 Release notes ----------
       - name: Generate release notes
-        id: notes
         run: |
           {
             echo "## BT Safe ${GITHUB_REF_NAME}"
@@ -172,26 +184,21 @@ jobs:
             echo "| 平台 | 文件 | 说明 |"
             echo "|------|------|------|"
             echo "| Windows x64 | \`bt_safe_windows_x64.zip\` | 解压后双击 bt_safe.exe |"
-            echo "| macOS (Universal) | \`bt_safe_macos_universal.zip\` | arm64 + x64，解压后拖入 Applications |"
-            echo "| Linux x64 | \`bt_safe_linux_x64.tar.gz\` | 解压后运行 ./bt_safe |"
+            echo "| macOS (Universal) | \`bt_safe_macos_universal.zip\` | arm64 + x64，拖入 Applications |"
+            echo "| Linux x64 | \`bt_safe_linux_x64.tar.gz\` | 解压后运行 ./bt_safe/bundle/bt_safe |"
             echo ""
             echo "### 校验"
             echo ""
             echo '```'
             echo "sha256sum bt_safe_*.* | tee SHA256SUMS"
             echo '```'
-            echo ""
-            echo "### 已知限制"
-            echo ""
-            echo "- 磁力链元数据拉取 (BEP-9) 未实现，请用 .torrent 文件"
-            echo "- VPN/TUN 流量加密需自行实现原生层（参见 docs）"
           } >> release_notes.md
-          cat release_notes.md
+        shell: bash
 
       - name: Calculate SHA256
+        shell: bash
         run: |
           sha256sum bt_safe_windows_x64.zip bt_safe_macos_universal.zip bt_safe_linux_x64.tar.gz | tee SHA256SUMS
-        shell: bash
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
