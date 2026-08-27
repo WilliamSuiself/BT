@@ -34,19 +34,24 @@ jobs:
             build_path: build/linux/x64/release
             bundle_name: bundle
 
-    env:
-      # 把 Flutter 加进 PATH（subosito/flutter-action 装到 ~/flutter）
-      FLUTTER_ROOT: ${{ github.workspace }}/.flutter
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ----- 安装 Flutter（显式版本）-----
-      - name: Install Flutter
-        uses: subosito/flutter-action@v2.18.0
-        with:
-          flutter-version: '3.41.2'
-          channel: stable
+      # ----- 显式 git clone Flutter SDK -----
+      - name: Clone Flutter SDK (Windows)
+        if: matrix.runner == 'windows-latest'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git C:/flutter
+          echo "C:/flutter/bin" >> $GITHUB_PATH
+
+      - name: Clone Flutter SDK (macOS/Linux)
+        if: matrix.runner != 'windows-latest'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git ~/flutter
+          echo "$HOME/flutter/bin" >> $GITHUB_PATH
 
       # ----- Linux 依赖 -----
       - name: Install Linux deps
@@ -58,14 +63,22 @@ jobs:
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++6
 
-      # ----- Debug：确认 flutter 可用 -----
-      - name: Verify flutter
+      # ----- 验证 Flutter -----
+      - name: Flutter version
         shell: bash
         run: |
-          which flutter || true
-          flutter --version || true
+          flutter --version
+          echo "PATH=$PATH"
 
-      # ----- pub get（在 bt_safe 子目录下）-----
+      # ----- Disable analytics + precache -----
+      - name: Flutter pre-cache
+        working-directory: bt_safe
+        shell: bash
+        run: |
+          flutter config --no-analytics
+          flutter precache --universal
+
+      # ----- pub get -----
       - name: flutter pub get
         working-directory: bt_safe
         shell: bash
@@ -166,10 +179,6 @@ jobs:
             echo "| Windows x64 | \`bt_safe_windows_x64.zip\` |"
             echo "| macOS Universal | \`bt_safe_macos_universal.zip\` |"
             echo "| Linux x64 | \`bt_safe_linux_x64.tar.gz\` |"
-            echo ""
-            echo '```'
-            echo "sha256sum bt_safe_*.*"
-            echo '```'
           } >> release_notes.md
         shell: bash
 
