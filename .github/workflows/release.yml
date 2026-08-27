@@ -1,4 +1,4 @@
-name: Release BT Safe
+name: Release BT Safe (Windows)
 
 on:
   push:
@@ -10,149 +10,101 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.label }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-latest
-            label: windows-x64
-            artifact_name: bt_safe_windows_x64
-            build_path: build/windows/x64/runner/Release
-            bundle_name: bt_safe
-
-          - runner: macos-latest
-            label: macos-universal
-            artifact_name: bt_safe_macos_universal
-            build_path: build/macos/Build/Products/Release
-            bundle_name: bt_safe.app
-
-          - runner: ubuntu-latest
-            label: linux-x64
-            artifact_name: bt_safe_linux_x64
-            build_path: build/linux/x64/release
-            bundle_name: bundle
+    name: Build Windows x64
+    runs-on: windows-latest
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ----- 显式 git clone Flutter SDK -----
-      - name: Clone Flutter SDK (Windows)
-        if: matrix.runner == 'windows-latest'
-        shell: bash
+      # ----- 装 Flutter SDK（用 PowerShell，避免 Git Bash 路径问题）-----
+      - name: Install Flutter SDK
+        shell: pwsh
         run: |
-          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git C:/flutter
-          echo "C:/flutter/bin" >> $GITHUB_PATH
-
-      - name: Clone Flutter SDK (macOS/Linux)
-        if: matrix.runner != 'windows-latest'
-        shell: bash
-        run: |
-          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git ~/flutter
-          echo "$HOME/flutter/bin" >> $GITHUB_PATH
-
-      # ----- Linux 依赖 -----
-      - name: Install Linux deps
-        if: matrix.label == 'linux-x64'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libstdc++6
+          Write-Host "Cloning Flutter SDK..."
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git C:\flutter
+          Write-Host "Flutter SDK cloned"
+          # 把 flutter 加到 PATH（写入 GITHUB_PATH 后续 step 生效）
+          "C:\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "GITHUB_PATH updated"
 
       # ----- 验证 Flutter -----
-      - name: Flutter version
-        shell: bash
+      - name: Verify Flutter
+        shell: pwsh
         run: |
           flutter --version
-          echo "PATH=$PATH"
+          Write-Host "PATH=$env:PATH"
 
-      # ----- pub get -----
+      # ----- 关掉 analytics -----
+      - name: Disable analytics
+        shell: pwsh
+        run: flutter config --no-analytics
+
+      # ----- pub get（用 cmd，避免 bash）-----
       - name: flutter pub get
         working-directory: bt_safe
-        shell: bash
-        env:
-          PUB_CACHE: ${{ runner.temp }}/pub-cache
+        shell: cmd
         run: |
-          flutter --suppress-analytics --version 2>&1 | tee /tmp/flutter-ver.log
-          echo "--- now pub get ---"
-          flutter --suppress-analytics pub get --verbose > /tmp/pubget.log 2>&1
-          PUBGET_EXIT=$?
-          echo "pub get exit code: $PUBGET_EXIT"
-          echo "--- pubget.log tail (200 lines) ---"
-          tail -n 200 /tmp/pubget.log || true
-          if [ $PUBGET_EXIT -ne 0 ]; then
-            exit $PUBGET_EXIT
-          fi
+          echo === pub get start ===
+          flutter --suppress-analytics pub get
+          if errorlevel 1 (
+            echo === pub get FAILED ===
+            exit /b 1
+          )
+          echo === pub get OK ===
 
-      # ----- 启用目标平台 -----
-      - name: Enable desktop targets
+      # ----- 启用 Windows desktop -----
+      - name: Enable Windows desktop
         working-directory: bt_safe
-        shell: bash
-        run: |
-          flutter config --enable-windows-desktop
-          flutter config --enable-macos-desktop
-          flutter config --enable-linux-desktop
+        shell: cmd
+        run: flutter config --enable-windows-desktop
 
       # ----- 跑测试 -----
       - name: Run tests
         working-directory: bt_safe
-        shell: bash
+        shell: cmd
         run: flutter test
 
       # ----- 构建 release -----
       - name: Build Windows release
-        if: matrix.label == 'windows-x64'
         working-directory: bt_safe
-        shell: bash
+        shell: cmd
         run: flutter build windows --release
 
-      - name: Build macOS release
-        if: matrix.label == 'macos-universal'
+      # ----- 检查产物 -----
+      - name: List build output
         working-directory: bt_safe
-        shell: bash
+        shell: pwsh
         run: |
-          flutter build macos --release
-          codesign --force --deep --sign - build/macos/Build/Products/Release/bt_safe.app || true
+          Write-Host "=== build dir ==="
+          Get-ChildItem build -Recurse -ErrorAction SilentlyContinue | Select-Object -First 30
+          Write-Host "=== Release dir ==="
+          if (Test-Path "build\windows\x64\runner\Release") {
+            Get-ChildItem "build\windows\x64\runner\Release"
+          } else {
+            Write-Host "Release dir not found"
+          }
 
-      - name: Build Linux release
-        if: matrix.label == 'linux-x64'
-        working-directory: bt_safe
-        shell: bash
-        run: flutter build linux --release
-
-      # ----- 拷贝成标准目录 -----
+      # ----- 拷贝成 bt_safe 子目录 -----
       - name: Stage artifact
-        shell: bash
         working-directory: bt_safe
+        shell: pwsh
         run: |
-          mkdir -p stage
-          cp -R "${{ matrix.build_path }}/${{ matrix.bundle_name }}" stage/${{ matrix.bundle_name }}
-          ls -la stage/
+          $src = "build\windows\x64\runner\Release"
+          $dst = "stage\bt_safe"
+          if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path "stage" | Out-Null
+          Copy-Item -Path $src -Destination $dst -Recurse -Force
+          Get-ChildItem $dst
 
       # ----- 上传 artifact -----
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: bt_safe/stage/${{ matrix.bundle_name }}/
+          name: bt_safe_windows_x64
+          path: bt_safe/stage/bt_safe/
           if-no-files-found: error
           retention-days: 30
-
-      # ----- 即便失败也上传日志 -----
-      - name: Upload debug logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-logs-${{ matrix.label }}
-          path: |
-            /tmp/flutter-ver.log
-            /tmp/pubget.log
-          if-no-files-found: ignore
-          retention-days: 3
 
   release:
     name: Create GitHub Release
@@ -162,7 +114,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -173,19 +125,8 @@ jobs:
           cd artifacts/bt_safe_windows_x64
           zip -r ../../bt_safe_windows_x64.zip .
 
-      - name: Zip macOS
-        shell: bash
-        run: |
-          cd artifacts/bt_safe_macos_universal
-          zip -r ../../bt_safe_macos_universal.zip bt_safe.app
-
-      - name: Tar Linux
-        shell: bash
-        run: |
-          cd artifacts/bt_safe_linux_x64
-          tar czf ../../bt_safe_linux_x64.tar.gz .
-
       - name: Generate release notes
+        shell: bash
         run: |
           {
             echo "## BT Safe ${GITHUB_REF_NAME}"
@@ -193,15 +134,11 @@ jobs:
             echo "| Platform | File |"
             echo "|----------|------|"
             echo "| Windows x64 | \`bt_safe_windows_x64.zip\` |"
-            echo "| macOS Universal | \`bt_safe_macos_universal.zip\` |"
-            echo "| Linux x64 | \`bt_safe_linux_x64.tar.gz\` |"
           } >> release_notes.md
-        shell: bash
 
       - name: Calculate SHA256
         shell: bash
-        run: |
-          sha256sum bt_safe_windows_x64.zip bt_safe_macos_universal.zip bt_safe_linux_x64.tar.gz | tee SHA256SUMS
+        run: sha256sum bt_safe_windows_x64.zip | tee SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -213,6 +150,4 @@ jobs:
           body_path: release_notes.md
           files: |
             bt_safe_windows_x64.zip
-            bt_safe_macos_universal.zip
-            bt_safe_linux_x64.tar.gz
             SHA256SUMS
