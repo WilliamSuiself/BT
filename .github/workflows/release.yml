@@ -77,8 +77,16 @@ jobs:
         env:
           PUB_CACHE: ${{ runner.temp }}/pub-cache
         run: |
-          flutter --suppress-analytics --version
-          flutter --suppress-analytics pub get --verbose 2>&1 | head -100
+          flutter --suppress-analytics --version 2>&1 | tee /tmp/flutter-ver.log
+          echo "--- now pub get ---"
+          flutter --suppress-analytics pub get --verbose > /tmp/pubget.log 2>&1
+          PUBGET_EXIT=$?
+          echo "pub get exit code: $PUBGET_EXIT"
+          echo "--- pubget.log tail (200 lines) ---"
+          tail -n 200 /tmp/pubget.log || true
+          if [ $PUBGET_EXIT -ne 0 ]; then
+            exit $PUBGET_EXIT
+          fi
 
       # ----- 启用目标平台 -----
       - name: Enable desktop targets
@@ -133,6 +141,18 @@ jobs:
           path: bt_safe/stage/${{ matrix.bundle_name }}/
           if-no-files-found: error
           retention-days: 30
+
+      # ----- 即便失败也上传日志 -----
+      - name: Upload debug logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-${{ matrix.label }}
+          path: |
+            /tmp/flutter-ver.log
+            /tmp/pubget.log
+          if-no-files-found: ignore
+          retention-days: 3
 
   release:
     name: Create GitHub Release
