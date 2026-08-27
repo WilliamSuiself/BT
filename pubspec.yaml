@@ -1,0 +1,41 @@
+name: bt_safe
+description: "BT Safe Downloader - 安全的 BitTorrent 下载工具（桌面端）"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # 状态管理
+  flutter_riverpod: ^2.5.1
+
+  # 路径与文件
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+  # 加密（SHA1/校验）
+  crypto: ^3.0.5
+
+  # 网络
+  web_socket_channel: ^3.0.1
+
+  # 日志
+  logger: ^2.4.0
+
+  # 唯一 ID / UUID
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
