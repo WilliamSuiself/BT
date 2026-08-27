@@ -13,84 +13,67 @@ jobs:
     name: Build Windows x64
     runs-on: windows-latest
 
-    env:
-      PUB_HOSTED_URL: https://pub.flutter-io.cn
-      FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ----- 装 Flutter SDK -----
       - name: Install Flutter SDK
         shell: pwsh
         run: |
-          Write-Host "Cloning Flutter SDK (stable)..."
           git clone --depth 1 --branch stable https://github.com/flutter/flutter.git C:\flutter
-          Write-Host "Flutter SDK cloned"
           "C:\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-      # ----- 验证 Flutter -----
       - name: Verify Flutter
         shell: pwsh
-        run: |
-          flutter --version
-          Write-Host "PATH=$env:PATH"
+        run: flutter --version
 
-      # ----- 关掉 analytics -----
       - name: Disable analytics
         shell: pwsh
         run: flutter config --no-analytics
 
-      # ----- pub get（用 cmd + 详细日志）-----
-      - name: flutter pub get
-        working-directory: bt_safe
-        shell: cmd
-        env:
-          PUB_HOSTED_URL: https://pub.flutter-io.cn
-          FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
-        run: |
-          echo === pub get start ===
-          flutter --suppress-analytics pub get
-          if errorlevel 1 (
-            echo === pub get FAILED ===
-            exit /b 1
-          )
-          echo === pub get OK ===
-
-      # ----- 启用 Windows desktop -----
-      - name: Enable Windows desktop
-        working-directory: bt_safe
-        shell: cmd
-        run: flutter config --enable-windows-desktop
-
-      # ----- 跑测试 -----
-      - name: Run tests
-        working-directory: bt_safe
-        shell: cmd
-        run: flutter test
-
-      # ----- 构建 release -----
-      - name: Build Windows release
-        working-directory: bt_safe
-        shell: cmd
-        run: flutter build windows --release
-
-      # ----- 检查产物 -----
-      - name: List build output
+      # ----- 抓详细错误并保存到日志文件 -----
+      - name: flutter pub get (verbose, log to file)
         working-directory: bt_safe
         shell: pwsh
         run: |
-          Write-Host "=== build dir ==="
-          Get-ChildItem build -Recurse -ErrorAction SilentlyContinue | Select-Object -First 30
-          Write-Host "=== Release dir ==="
-          if (Test-Path "build\windows\x64\runner\Release") {
-            Get-ChildItem "build\windows\x64\runner\Release"
+          $logPath = "$env:RUNNER_TEMP\pub-get.log"
+          Write-Host "Running pub get with verbose log to $logPath"
+          flutter --suppress-analytics --verbose pub get *> $logPath
+          $exitCode = $LASTEXITCODE
+          Write-Host "=== pub get exit code: $exitCode ==="
+          Write-Host "=== last 80 lines of log ==="
+          if (Test-Path $logPath) {
+            Get-Content $logPath -Tail 80
           } else {
-            Write-Host "Release dir not found"
+            Write-Host "(no log file)"
           }
+          if ($exitCode -ne 0) { exit $exitCode }
 
-      # ----- 拷贝成 bt_safe 子目录 -----
+      # ----- 调试用：把日志作为 artifact 上传（即使失败） -----
+      - name: Upload debug log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pub-get-log
+          path: ${{ runner.temp }}/pub-get.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Enable Windows desktop
+        working-directory: bt_safe
+        shell: pwsh
+        run: flutter config --enable-windows-desktop
+
+      - name: Run tests
+        working-directory: bt_safe
+        shell: pwsh
+        run: flutter test
+
+      - name: Build Windows release
+        working-directory: bt_safe
+        shell: pwsh
+        run: flutter build windows --release
+
       - name: Stage artifact
         working-directory: bt_safe
         shell: pwsh
@@ -102,7 +85,6 @@ jobs:
           Copy-Item -Path $src -Destination $dst -Recurse -Force
           Get-ChildItem $dst
 
-      # ----- 上传 artifact -----
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
