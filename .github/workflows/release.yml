@@ -14,64 +14,32 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Flutter SDK
-        shell: pwsh
-        run: |
-          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git C:\flutter
-          "C:\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
-      - name: Verify Flutter
-        shell: pwsh
+      - name: Show flutter version
         run: flutter --version
 
-      - name: Disable analytics
-        shell: pwsh
-        run: flutter config --no-analytics
-
-      # ----- 抓详细错误并保存到日志文件 -----
-      - name: flutter pub get (verbose, log to file)
+      - name: flutter pub get
         working-directory: bt_safe
-        shell: pwsh
-        run: |
-          $logPath = "$env:RUNNER_TEMP\pub-get.log"
-          Write-Host "Running pub get with verbose log to $logPath"
-          flutter --suppress-analytics --verbose pub get *> $logPath
-          $exitCode = $LASTEXITCODE
-          Write-Host "=== pub get exit code: $exitCode ==="
-          Write-Host "=== last 80 lines of log ==="
-          if (Test-Path $logPath) {
-            Get-Content $logPath -Tail 80
-          } else {
-            Write-Host "(no log file)"
-          }
-          if ($exitCode -ne 0) { exit $exitCode }
-
-      # ----- 调试用：把日志作为 artifact 上传（即使失败） -----
-      - name: Upload debug log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pub-get-log
-          path: ${{ runner.temp }}/pub-get.log
-          if-no-files-found: ignore
-          retention-days: 3
+        run: flutter pub get
 
       - name: Enable Windows desktop
         working-directory: bt_safe
-        shell: pwsh
         run: flutter config --enable-windows-desktop
 
       - name: Run tests
         working-directory: bt_safe
-        shell: pwsh
         run: flutter test
 
       - name: Build Windows release
         working-directory: bt_safe
-        shell: pwsh
         run: flutter build windows --release
 
       - name: Stage artifact
@@ -83,7 +51,6 @@ jobs:
           if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
           New-Item -ItemType Directory -Force -Path "stage" | Out-Null
           Copy-Item -Path $src -Destination $dst -Recurse -Force
-          Get-ChildItem $dst
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
