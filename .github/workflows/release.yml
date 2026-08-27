@@ -70,16 +70,8 @@ jobs:
           flutter --version
           echo "PATH=$PATH"
 
-      # ----- Wait for Flutter to fully initialize (Dart SDK download) -----
-      - name: Initialize Flutter
-        working-directory: bt_safe
-        shell: bash
-        run: |
-          flutter --version
-          flutter doctor
-          flutter config --no-analytics
-
       # ----- pub get -----
+      # flutter --version 已在上一 step 完成 SDK 初始化，这里直接 pub get
       - name: flutter pub get
         working-directory: bt_safe
         shell: bash
