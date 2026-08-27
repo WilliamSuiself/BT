@@ -70,13 +70,11 @@ jobs:
           flutter --version
           echo "PATH=$PATH"
 
-      # ----- Disable analytics + precache -----
-      - name: Flutter pre-cache
+      # ----- Disable analytics -----
+      - name: Disable analytics
         working-directory: bt_safe
         shell: bash
-        run: |
-          flutter config --no-analytics
-          flutter precache --universal
+        run: flutter config --no-analytics
 
       # ----- pub get -----
       - name: flutter pub get
